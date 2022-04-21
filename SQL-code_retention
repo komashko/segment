@@ -1,0 +1,48 @@
+-- ИЩЕМ РАЗЛИЧИЯ В МЕСЯЧНОМ RETENTION ПОЛЬЗОВАТЕЛЕЙ ИЗ РОССИИ И ИЗ ДРУГИХ СТРАН
+-- категоризируем по стране
+with users_address as(		
+        select 
+             user_id id,
+             case when country = 'Russia' then 'yes'
+             when country is null then null
+             else 'no' end as is_russia
+        from gd2.addresses 
+     ),
+     -- категоризируем пользователей по телефону (Российские номера начинаются на 7 и имеют длину 11 знаков)
+     user_phone as(
+        select 
+             id,
+             case when left(phone,1) ='7' and length(phone) = 11 then 'yes'
+             when phone is null then null
+             else 'no' end as is_russia
+        from gd2.users_phones
+    ),
+    -- соединяем категории пользователей 
+    users_with_geo as(
+        select
+        u.id,
+        coalesce(a.is_russia,p.is_russia) rus
+        from gd2.users_phones u left join
+        users_address a on a.id=u.id left join
+        user_phone p on p.id=u.id
+    ),
+    -- определяем даты первых покупок пользователей (когорты)
+    first_purchases as(
+    select 
+        distinct(p.user_id),
+        min (p.created_at) first_m 
+    from gd2.purchases p 
+    group by 1 
+    )
+    -- группируем когорты по условию Россия, аналогично формируем запрос для неРоссия 
+select
+    to_char(fp.first_m,'YYYY-MM') cohorta,
+    p.created_at,
+    fp.user_id users
+from first_purchases fp left join
+    users_with_geo ug on fp.user_id=ug.id join
+    gd2.purchases p on p.user_id=fp.user_id
+where
+    ug.rus = 'yes' and
+    p.state = 'successful'
+order by 1,2
